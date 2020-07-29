@@ -1,8 +1,100 @@
 package noise
 
-/* The translation to Go of this code was made by Jack Mott
- * https://gist.github.com/jackmott/7a85b4ff6120cc7885a22d3e162ce115
- * https://github.com/stegu/perlin-noise/blob/master/src/simplexnoise1234.c
+import (
+	"runtime"
+	"sync"
+)
+
+//NoiseType indicate which noise to generate
+type NoiseType int
+
+const (
+	FBM NoiseType = iota
+	TURBULENCE
+)
+
+//Turbulence Fractal noise
+func Turbulence(x, y, frequency, lacunarity, gain float32, octaves int) float32 {
+	var sum float32
+	amplitude := float32(1)
+	for i := 0; i < octaves; i++ {
+		f := Snoise2(x*frequency, y*frequency) * amplitude
+		if f < 0 {
+			f = -1.0 * f
+		}
+		sum += f
+		frequency *= lacunarity
+		amplitude *= gain
+	}
+	return sum
+}
+
+//Fbm2 Fractal Browian Motion
+func Fbm2(x, y, frequency, lacunarity, gain float32, octaves int) float32 {
+	var sum float32
+	amplitude := float32(1.0)
+	for i := 0; i < octaves; i++ {
+		sum += Snoise2(x*frequency, y*frequency) * amplitude
+		frequency *= lacunarity
+		amplitude *= gain
+	}
+	return sum
+}
+
+//MakeNoise Create a 2d block of noise
+func MakeNoise(noiseType NoiseType, frequency, lac, gain float32, octaves, width, heigth int) (noises []float32, minimum, maximum float32) {
+	noises = make([]float32, width*heigth)
+
+	numRoutine := runtime.NumCPU()
+	min := make(chan float32, numRoutine)
+	max := make(chan float32, numRoutine)
+
+	batchSize := len(noises) / numRoutine
+	var wg sync.WaitGroup
+	wg.Add(numRoutine)
+	for i := 0; i < numRoutine; i++ {
+		go func(i int) {
+			defer wg.Done()
+			minimum := float32(9999)
+			maximum := float32(-9999)
+			start := i * batchSize
+			end := start + batchSize - 1
+			for j := start; j < end; j++ {
+				x := j % width
+				y := (j - x) / heigth
+				if noiseType == TURBULENCE {
+					noises[j] = Turbulence(float32(x), float32(y), frequency, lac, gain, octaves)
+				} else if noiseType == FBM {
+					noises[j] = Fbm2(float32(x), float32(y), frequency, lac, gain, octaves)
+				}
+				if noises[j] < minimum {
+					minimum = noises[j]
+				} else if noises[j] > maximum {
+					maximum = noises[j]
+				}
+			}
+			min <- minimum
+			max <- maximum
+		}(i)
+	}
+	minimum = <-min
+	maximum = <-max
+	for i := 1; i < numRoutine; i++ {
+		nb1 := <-min
+		nb2 := <-max
+		if minimum > nb1 {
+			minimum = nb1
+		}
+		if maximum > nb2 {
+			maximum = nb2
+		}
+	}
+	wg.Wait()
+
+	return noises, minimum, maximum
+}
+
+/* https://github.com/stegu/perlin-noise/blob/master/src/simplexnoise1234.c
  * SimplexNoise1234, Simplex noise with true analytic
  * derivative in 1D to 4D.
  *
@@ -84,7 +176,7 @@ func grad2(hash uint8, x, y float32) float32 {
 	return u + v
 }
 
-//Snoise 2D simplex noise
+//Snoise2 2D simplex noise
 func Snoise2(x, y float32) float32 {
 
 	const F2 float32 = 0.366025403 // F2 = 0.5*(sqrt(3.0)-1.0)
