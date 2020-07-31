@@ -1,6 +1,7 @@
 package noise
 
 import (
+	"math"
 	"runtime"
 	"sync"
 )
@@ -55,8 +56,8 @@ func MakeNoise(noiseType NoiseType, frequency, lac, gain float32, octaves, width
 	for i := 0; i < numRoutine; i++ {
 		go func(i int) {
 			defer wg.Done()
-			minimum := float32(9999)
-			maximum := float32(-9999)
+			minimum := float32(math.MaxFloat32)
+			maximum := float32(-math.MaxFloat32)
 			start := i * batchSize
 			end := start + batchSize - 1
 			for j := start; j < end; j++ {
